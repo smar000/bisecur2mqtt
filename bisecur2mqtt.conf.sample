@@ -1,0 +1,29 @@
+
+logfile         = 'mqtt2bisecur.log'
+
+# BiSecur Gateway 
+bisecur_user   = 'a_user'
+bisecur_pw     = 'my_pw;'
+bisecur_ip     = 'bisecuregateway'
+bisecur_mac    = 'XX:XX:XX:XX:XX:XX'
+src_mac        = 'FF:FF:FF:FF:FF:FF'
+
+# Port numbers for the door related actions
+impulse_port    = 0
+up_port         = 3
+down_port       = 4
+partial_port    = 2
+light_port      = 1
+
+# MQTT broker 
+mqtt_broker     = '172.16.2.31'
+mqtt_port       = 1883              # default: 1883
+mqtt_clientid   = 'mqtt2bisecur'
+mqtt_username   = 'openhab'   
+mqtt_password   = 'HABopen'
+mqtt_tls        = None              # default: No TLS
+
+mqtt_topic_base = "bisecur2mqtt"
+mqtt_topic_HA_discovery ="homeassistant"
+
+

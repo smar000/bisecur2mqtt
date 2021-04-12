@@ -1,0 +1,11 @@
+[Unit]
+Description=Hormann Bisecur Gateway to MQTT Service
+
+[Service]
+Type=idle
+WorkingDirectory=/opt/scripts/bisecur
+ExecStart=/usr/bin/python3 /opt/scripts/bisecur/bisecur2mqtt.py
+
+[Install]
+Alias=bisecur2mqtt
+WantedBy=default.target
