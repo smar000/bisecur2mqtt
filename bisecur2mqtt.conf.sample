@@ -1,29 +1,58 @@
 
-logfile         = 'mqtt2bisecur.log'
+# ================================================================
+# bisecur2mqtt configuration
+# Copy to bisecur2mqtt.conf and fill in your values.
+# Config path can be overridden with: BISECUR2MQTT_CONFIG=/path/to/file
+# ================================================================
 
-# BiSecur Gateway 
-bisecur_user   = 'a_user'
-bisecur_pw     = 'my_pw;'
-bisecur_ip     = 'bisecuregateway'
-bisecur_mac    = 'XX:XX:XX:XX:XX:XX'
-src_mac        = 'FF:FF:FF:FF:FF:FF'
+# --- Logging ---
+# Log file is named after the script (bisecur2mqtt.log) and written to log_dir.
+log_dir             = '.'              # directory for log files (default: current dir)
+# log_max_size_mb     = 10             # max log file size in MB before rotation (default: 10)
+# log_backup_count    = 5              # number of rotated log files to keep (default: 5)
+# debug               = False          # verbose protocol logging
+# debug_jcmp          = False          # log all JCMP JSON request/response pairs
+# debug_packets       = False          # log raw hex packet data (very verbose)
 
-# Port numbers for the door related actions
-impulse_port    = 0
-up_port         = 3
-down_port       = 4
-partial_port    = 2
-light_port      = 1
 
-# MQTT broker 
-mqtt_broker     = '172.16.2.31'
+# --- BiSecur Gateway ---
+bisecur_user    = 'admin'
+bisecur_pw      = 'changeme'
+bisecur_ip      = '192.168.1.100'
+bisecur_mac     = 'XX:XX:XX:XX:XX:XX'  # gateway MAC, colons optional
+src_mac         = 'FF:FF:FF:FF:FF:FF'  # spoofed source MAC, any value works
+# bisecur_timeout = 10                # gateway socket timeout in seconds
+
+
+# --- Door identity ---
+# MQTT subtopic for all door messages: bisecur2mqtt/{door_name}/position etc.
+# Auto-detected from gateway group name if groups are configured; falls back here.
+# Value is normalised to lowercase_snake_case automatically.
+door_name       = 'garage_door'
+
+
+# --- Port numbers ---
+# Find these by running: python3 bisecur_cli.py status
+# Each port must be configured in the Hormann BiSecur mobile app first.
+impulse_port    = 0                 # required; also used for position queries by default
+up_port         = 1
+down_port       = 2
+partial_port    = 3
+light_port      = 4
+
+# Port for position queries (CMD_GET_TRANSITION / HM_GET_TRANSITION).
+# Defaults to impulse_port — all active ports return the overall door position.
+# Override only if a dedicated position port is required.
+# position_port   = 0
+
+
+# --- MQTT broker ---
+mqtt_broker     = '192.168.1.10'
 mqtt_port       = 1883              # default: 1883
-mqtt_clientid   = 'mqtt2bisecur'
-mqtt_username   = 'openhab'   
-mqtt_password   = 'HABopen'
-mqtt_tls        = None              # default: No TLS
+mqtt_client_id  = 'bisecur2mqtt'
+mqtt_username   = 'username'
+mqtt_password   = 'password'
+mqtt_tls        = None              # set to anything non-None to enable TLS
 
-mqtt_topic_base = "bisecur2mqtt"
-mqtt_topic_HA_discovery ="homeassistant"
-
-
+mqtt_topic_base          = 'bisecur2mqtt'
+mqtt_topic_HA_discovery  = 'homeassistant'

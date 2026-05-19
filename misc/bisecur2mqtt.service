@@ -2,10 +2,10 @@
 Description=Hormann Bisecur Gateway to MQTT Service
 
 [Service]
-Type=idle
-WorkingDirectory=/opt/scripts/bisecur
-ExecStart=/usr/bin/python3 /opt/scripts/bisecur/bisecur2mqtt.py
-Restart=on-failure
+Type=simple
+WorkingDirectory=/opt/bisecur
+ExecStart=/usr/bin/python3 /opt/bisecur/bisecur2mqtt.py
+Restart=always
 RestartSec=5
 
 [Install]
