@@ -16,9 +16,10 @@ A local MQTT bridge for a Hormann BiSecur garage door gateway. The gateway speak
 | `bisecur_client.py` | Self-contained MCP protocol client. The only file that opens a socket to the gateway. Thread-safe via internal lock. |
 | `bisecur2mqtt.py` | MQTT bridge service. Imports `bisecur_client`. Handles reconnect, position tracking, HA autodiscovery. |
 | `bisecur_cli.py` | CLI tool. Imports `bisecur_client`. Each invocation does connect→login→action→disconnect. |
-| `tests/test_gateway.py` | Integration smoke-test. Prints firmware version, port scan, users, groups. Uses DEBUG logging. |
 | `bisecur2mqtt.conf` | Live config (gitignored). `bisecur2mqtt.conf.sample` is the tracked template. |
 | `docs/REFERENCE.md` | Protocol internals, quirks, threading model, how to add commands. Read this before touching the protocol. |
+| `misc/bisecur2mqtt.service` | systemd unit file. Copy to `/etc/systemd/system/` to run as a service. |
+| `misc/test_gateway.py` | Integration smoke-test. Prints firmware version, port scan, users, groups. Uses DEBUG logging. |
 | `legacy/` | Original pysecur3 library and tools. Not used. Kept for protocol reference — `legacy/pysecur3/MCP.py` has the full command enum. |
 
 ## Protocol in one paragraph
