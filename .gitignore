@@ -24,6 +24,9 @@ dist/
 env/
 venv/
 
+# Local scripts
+showlog.sh
+
 # Tools / IDE
 .vscode/
 .pylintrc
