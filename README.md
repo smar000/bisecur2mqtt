@@ -15,8 +15,8 @@ bisecur2mqtt.py          Main MQTT bridge service
 bisecur_client.py        BiSecur MCP protocol client library
 bisecur_cli.py           Command-line tool for direct gateway control
 bisecur2mqtt.conf.sample Config file template (copy to bisecur2mqtt.conf)
-bisecur2mqtt.service     systemd unit file
-tests/
+misc/
+  bisecur2mqtt.service   systemd unit file
   test_gateway.py        Integration smoke-test (connect, query status)
 legacy/
   pysecur3/              Original pysecur3 library (reference only)
@@ -65,12 +65,17 @@ cp bisecur2mqtt.conf.sample bisecur2mqtt.conf
 | `mqtt_topic_base` | no | Root MQTT topic (default: `bisecur2mqtt`) |
 | `mqtt_topic_HA_discovery` | no | Home Assistant discovery prefix (default: `homeassistant`) |
 | `bisecur_timeout` | no | Gateway socket timeout in seconds (default: `10`) |
+| `log_dir` | no | Directory for log files (default: `.`); file named `bisecur2mqtt.log` |
+| `log_max_size_mb` | no | Log file size in MB before rotation (default: `10`) |
+| `log_backup_count` | no | Number of rotated log files to keep (default: `5`) |
 | `debug` | no | Set `True` for verbose protocol logging (default: `False`) |
+| `debug_jcmp` | no | Set `True` to log all JCMP JSON request/response pairs (default: `False`) |
+| `debug_packets` | no | Set `True` to log raw hex packet data — very verbose (default: `False`) |
 
 ### 2. Run as a service
 
 ```bash
-sudo cp bisecur2mqtt.service /etc/systemd/system/
+sudo cp misc/bisecur2mqtt.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable bisecur2mqtt
 sudo systemctl start bisecur2mqtt

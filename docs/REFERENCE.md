@@ -17,7 +17,8 @@ The project originally used the [pysecur3](https://github.com/skelsec/pysecur3) 
 | `bisecur_client.py` | MCP protocol client — the only file that speaks to the gateway |
 | `bisecur2mqtt.py` | MQTT bridge service — imports `bisecur_client`, handles MQTT I/O and reconnect logic |
 | `bisecur_cli.py` | CLI tool — imports `bisecur_client`, no MQTT |
-| `tests/test_gateway.py` | Integration smoke-test — connects, queries firmware, ports, users, groups |
+| `misc/test_gateway.py` | Integration smoke-test — connects, queries firmware, ports, users, groups |
+| `misc/bisecur2mqtt.service` | systemd unit file — copy to `/etc/systemd/system/` |
 | `legacy/pysecur3/MCP.py` | Best reference for the full MCP command enum and packet structures |
 
 ---
@@ -193,6 +194,17 @@ bisecur_pw   = 'secret'
 ```
 
 The config file is selected via the `BISECUR2MQTT_CONFIG` environment variable, defaulting to `bisecur2mqtt.conf` in the working directory.
+
+### Logging config keys
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `log_dir` | `.` | Directory for log files; file is named after the script (`bisecur2mqtt.log`) |
+| `log_max_size_mb` | `10` | Max log file size in MB before rotation |
+| `log_backup_count` | `5` | Number of rotated files to keep (`.log.1` … `.log.N`) |
+| `debug` | `False` | Enable DEBUG-level logging |
+| `debug_jcmp` | `False` | Log all JCMP JSON request/response pairs at INFO level |
+| `debug_packets` | `False` | Log raw hex packet data at INFO level (very verbose) |
 
 ---
 
