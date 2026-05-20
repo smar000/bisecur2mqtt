@@ -14,7 +14,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 
 from bisecur_client import BisecurError, BisecurGateway
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 CONFIG_FILE = os.getenv('BISECUR2MQTT_CONFIG', 'bisecur2mqtt.conf')
 
@@ -104,6 +104,10 @@ _last_door_state: str | None = None
 
 _pos_stop_event      = threading.Event()
 _pos_tracking_thread: threading.Thread | None = None
+
+_periodic_stop_event  = threading.Event()
+_periodic_poll_thread: threading.Thread | None = None
+_poll_interval_min: float = 15.0   # authoritative runtime value; updated by set_poll_interval
 
 _reconnect_in_progress = False
 _reconnect_lock        = threading.Lock()
@@ -348,6 +352,56 @@ def _update_light_status() -> None:
 
 
 # ------------------------------------------------------------------ #
+# Periodic position poll
+# ------------------------------------------------------------------ #
+
+def _restart_periodic_poll(new_interval_min: float) -> None:
+    """Stop any running periodic poll thread and start a fresh one at new_interval_min."""
+    global _periodic_stop_event, _periodic_poll_thread, _poll_interval_min
+
+    _poll_interval_min = new_interval_min
+
+    _periodic_stop_event.set()
+    if _periodic_poll_thread and _periodic_poll_thread.is_alive():
+        _periodic_poll_thread.join(timeout=5.0)
+
+    _periodic_stop_event = threading.Event()
+
+    if new_interval_min > 0:
+        _periodic_poll_thread = threading.Thread(
+            name='periodic_poll',
+            target=_periodic_poll_worker,
+            args=(new_interval_min * 60, _periodic_stop_event),
+            daemon=True,
+        )
+        _periodic_poll_thread.start()
+        log.info(f"Periodic poll restarted at {new_interval_min:.4g} min")
+    else:
+        _periodic_poll_thread = None
+        log.info("Periodic poll disabled")
+
+    publish(f"attributes/poll_interval_min", str(new_interval_min))
+
+
+def _periodic_poll_worker(interval_s: float, stop_event: threading.Event) -> None:
+    """
+    Background thread: poll door position every interval_s seconds.
+    Skips a poll cycle if a door-action tracking thread is currently active.
+    """
+    log.info(f"Periodic position poll started (interval={interval_s:.0f}s)")
+    while not stop_event.wait(interval_s):
+        if _pos_tracking_thread and _pos_tracking_thread.is_alive():
+            log.debug("Periodic poll skipped — door tracking in progress")
+            continue
+        if not gateway.is_connected:
+            log.debug("Periodic poll skipped — gateway not connected")
+            continue
+        log.debug("Periodic poll: refreshing door position")
+        _update_door_status()
+    log.debug("Periodic position poll stopped")
+
+
+# ------------------------------------------------------------------ #
 # Command dispatcher
 # ------------------------------------------------------------------ #
 
@@ -428,6 +482,25 @@ def do_command(cmd: str) -> None:
         elif cmd in ("sys_restart", "init_bisecur_gw"):
             _trigger_reconnect()
             resp = "Reconnect triggered"
+
+        elif cmd.startswith("set_poll_interval"):
+            parts = cmd.split()
+            if len(parts) != 2:
+                resp = "Usage: set_poll_interval <minutes>"
+            else:
+                try:
+                    new_val = float(parts[1])
+                    if new_val < 0:
+                        raise ValueError("interval must be >= 0")
+                    _restart_periodic_poll(new_val)
+                    resp = f"Poll interval set to {new_val:.4g} min" if new_val > 0 else "Periodic poll disabled"
+                    log.info(f"set_poll_interval: {resp}")
+                except ValueError as e:
+                    resp = f"Invalid value: {e}"
+                    log.warning(f"set_poll_interval bad value: {e}")
+
+        elif cmd == "get_poll_interval":
+            resp = f"poll_interval_min={_poll_interval_min:.4g}"
 
         else:
             resp = f"Unknown command: '{cmd}'"
@@ -628,6 +701,9 @@ if __name__ == '__main__':
     _update_door_status()
     _update_light_status()
 
+    # --- Start periodic position poll ---
+    _restart_periodic_poll(float(config.get("position_poll_interval", 15)))
+
     # --- Run until SIGTERM / SIGINT ---
     shutdown_event = threading.Event()
 
@@ -643,7 +719,10 @@ if __name__ == '__main__':
 
     # --- Graceful shutdown ---
     log.info("Shutting down…")
+    _periodic_stop_event.set()
     _pos_stop_event.set()
+    if _periodic_poll_thread and _periodic_poll_thread.is_alive():
+        _periodic_poll_thread.join(timeout=5.0)
     if _pos_tracking_thread and _pos_tracking_thread.is_alive():
         _pos_tracking_thread.join(timeout=3.0)
 

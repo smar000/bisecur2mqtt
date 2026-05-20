@@ -59,6 +59,7 @@ cp bisecur2mqtt.conf.sample bisecur2mqtt.conf
 | `light_port` | no | Port for light toggle |
 | `door_name` | no | MQTT subtopic name for this door (default: `default_door`; auto-detected from gateway group name if configured) |
 | `position_port` | no | Port for position queries (default: `impulse_port`) |
+| `position_poll_interval` | no | Minutes between automatic position refreshes (default: `15`; set `0` to disable) |
 | `mqtt_broker` | yes | MQTT broker IP or hostname |
 | `mqtt_port` | no | MQTT broker port (default: `1883`) |
 | `mqtt_client_id` | no | MQTT client ID (default: `bisecur2mqtt-<pid>`) |
@@ -128,6 +129,8 @@ mosquitto_pub -h <broker> -t bisecur2mqtt/send_command/command -m impulse
 |---------|-------------|
 | `login` | Re-authenticate with the gateway |
 | `sys_restart` | Trigger gateway reconnect |
+| `set_poll_interval <N>` | Set periodic position poll interval to N minutes at runtime (0 = disable) |
+| `get_poll_interval` | Publish current poll interval to the response topic |
 
 ### Published topics
 

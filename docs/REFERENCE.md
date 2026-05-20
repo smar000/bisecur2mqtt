@@ -175,7 +175,8 @@ The gateway allows only one active authenticated session. Running `bisecur_cli.p
 |--------|---------|
 | Main thread | MQTT loop (`loop_forever`) |
 | MQTT callback thread | `on_message` → `do_command()` → `gateway.set_door_state()` |
-| Position tracking thread | Polls `get_door_position()` while door is in motion |
+| Position tracking thread | Polls `get_door_position()` every second while door is in motion |
+| Periodic poll thread | Wakes every `position_poll_interval` minutes to refresh and publish door position; skips cycle if tracking thread is active. Restarted atomically by `_restart_periodic_poll()` when interval is changed at runtime via `set_poll_interval`. |
 | Reconnect thread | Started on `ConnectionError`; calls `gateway.reconnect()` with exponential backoff |
 
 `BisecurGateway` is thread-safe: all public operations (`get_door_position`, `set_door_state`, etc.) acquire an internal `threading.Lock`. `connect()` and `login()` do **not** acquire the lock and must only be called from single-threaded context or from within `reconnect()` which already holds the lock.

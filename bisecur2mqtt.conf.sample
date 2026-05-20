@@ -46,6 +46,12 @@ light_port      = 4
 # position_port   = 0
 
 
+# --- Periodic position polling ---
+# Interval (in minutes) between automatic door position refreshes.
+# Set to 0 to disable periodic polling.
+# position_poll_interval = 15
+
+
 # --- MQTT broker ---
 mqtt_broker     = '192.168.1.10'
 mqtt_port       = 1883              # default: 1883

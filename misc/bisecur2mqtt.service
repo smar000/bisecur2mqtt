@@ -1,13 +1,14 @@
 [Unit]
 Description=Hormann Bisecur Gateway to MQTT Service
+After=multi-user.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/bisecur
-ExecStart=/usr/bin/python3 /opt/bisecur/bisecur2mqtt.py
+WorkingDirectory=/opt/bisecur2mqtt
+ExecStart=/usr/bin/python3 bisecur2mqtt.py
 Restart=always
-RestartSec=5
+RestartSec=20
 
 [Install]
-Alias=bisecur2mqtt
 WantedBy=default.target
