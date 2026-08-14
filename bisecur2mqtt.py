@@ -92,8 +92,6 @@ MQTT_TOPIC_BASE      = config.get("mqtt_topic_base", "bisecur2mqtt")
 MQTT_COMMAND_SUBTOPIC = "send_command"
 MQTT_QOS             = 0
 
-COMMAND_DELAY_SECONDS = float(config.get("command_delay_seconds", 0.5))  # Rate limiting
-
 mqtt_client: paho.Client | None = None
 gateway: BisecurGateway | None  = None
 
@@ -130,8 +128,10 @@ _door_topic: str = "default_door"
 _gw_query_failures: int = 0
 _GW_FAILURE_THRESHOLD: int = 5  # Alert after 5 consecutive failures
 
-# Command rate limiting: track last command time
+# Command rate limiting: track last command time and action
 _last_command_time: float = 0.0
+_last_command_action: str | None = None
+_COMMAND_RATE_LIMIT_SECONDS: float = 2.0  # Prevent same/opposite direction within this window
 
 
 # ------------------------------------------------------------------ #
@@ -250,21 +250,28 @@ def _do_door_action(action: str) -> str:
     Send a door command to the gateway and start position tracking.
     Returns a human-readable result string.
 
-    Enforces a minimum delay between commands to prevent gateway rate limiting
-    (which can cause the gateway to become unresponsive).
+    Rate limiting logic:
+    - STOP commands are always allowed (emergency operation)
+    - Same-direction or opposite-direction commands: max once per 2 seconds
+    - This prevents gateway rate limiting / buffer overflow issues
     """
-    global _last_door_state, _pos_tracking_thread, _pos_stop_event, _last_command_time
+    global _last_door_state, _pos_tracking_thread, _pos_stop_event
+    global _last_command_time, _last_command_action
 
-    # Enforce command rate limiting
-    now = time.time()
-    time_since_last = now - _last_command_time
-    if time_since_last < COMMAND_DELAY_SECONDS:
-        delay = COMMAND_DELAY_SECONDS - time_since_last
-        log.debug(f"Rate limiting: waiting {delay:.2f}s before next command")
-        time.sleep(delay)
+    # STOP commands bypass rate limiting (emergency/safety)
+    if action != "stop":
+        now = time.time()
+        time_since_last = now - _last_command_time
+
+        # Rate-limit if within the window AND it's a directional command (not STOP)
+        if time_since_last < _COMMAND_RATE_LIMIT_SECONDS and _last_command_action is not None:
+            delay = _COMMAND_RATE_LIMIT_SECONDS - time_since_last
+            log.info(f"Rate limiting: {action} delayed {delay:.2f}s "
+                     f"(last command: {_last_command_action}, {time_since_last:.1f}s ago)")
+            time.sleep(delay)
+
         _last_command_time = time.time()
-    else:
-        _last_command_time = now
+        _last_command_action = action
 
     if action == "stop":
         with _state_lock:
