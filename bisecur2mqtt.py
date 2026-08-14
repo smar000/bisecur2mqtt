@@ -123,6 +123,11 @@ _pos_port: int = 0
 # Resolved at startup from gateway group name, config door_name, or "default_door".
 _door_topic: str = "default_door"
 
+# Gateway health check: count consecutive query failures
+# (The gateway firmware has a known bug where it becomes unresponsive and requires reboot)
+_gw_query_failures: int = 0
+_GW_FAILURE_THRESHOLD: int = 5  # Alert after 5 consecutive failures
+
 
 # ------------------------------------------------------------------ #
 # MQTT helper
@@ -184,16 +189,33 @@ def _update_door_status() -> tuple[int, str]:
     """
     Poll the gateway for current door position/state and publish to MQTT.
     Returns (position, state) or (-1, 'unknown') on failure.
+
+    Note: The gateway may intermittently become unresponsive (known firmware issue).
+    When this happens, position queries fail with PORT_ERROR even though ports exist.
+    A gateway reboot usually restores functionality.
     """
-    global _last_door_state
+    global _last_door_state, _gw_query_failures
+
     try:
         pos = gateway.get_door_position(_pos_port)
+        # Query succeeded — reset failure counter
+        if _gw_query_failures > 0:
+            log.info(f"Gateway responsive again (recovered after {_gw_query_failures} failures)")
+            publish("attributes/gateway_health", "ok")
+            _gw_query_failures = 0
     except ConnectionError as e:
         log.error(f"get_door_position failed (connection lost): {e}")
         _trigger_reconnect()
         return -1, "unknown"
     except BisecurError as e:
-        log.warning(f"get_door_position failed (port {_pos_port}): {e}")
+        _gw_query_failures += 1
+        if _gw_query_failures == 1:
+            log.error(f"get_door_position failed (port {_pos_port}): {e}")
+        if _gw_query_failures >= _GW_FAILURE_THRESHOLD:
+            msg = (f"Gateway unresponsive ({_gw_query_failures} consecutive failures). "
+                   f"This is a known firmware bug — try rebooting the gateway.")
+            log.error(msg)
+            publish("attributes/gateway_health", "unresponsive", retain=True)
         return -1, "unknown"
 
     if pos < 0:
@@ -280,6 +302,7 @@ def _track_door_position(action: str, stop_event: threading.Event) -> None:
     global _last_door_state
     last_pos = -1
     door_settled = False
+    error_count = 0
 
     while not stop_event.wait(1.0):
         try:
@@ -287,10 +310,18 @@ def _track_door_position(action: str, stop_event: threading.Event) -> None:
         except ConnectionError as e:
             log.warning(f"Position tracking — connection lost: {e}")
             break
-        except BisecurError:
+        except BisecurError as e:
+            error_count += 1
+            if error_count == 1:  # Log the first error, then less frequently
+                log.warning(f"Position tracking — query failed (port {_pos_port}): {e}")
+            elif error_count % 10 == 0:
+                log.debug(f"Position tracking — query still failing ({error_count} errors)")
             continue
 
+        error_count = 0  # Reset error counter when query succeeds
+
         if pos < 0:
+            log.warning(f"Position tracking — no data from gateway (port {_pos_port})")
             break
 
         if last_pos == -1:
