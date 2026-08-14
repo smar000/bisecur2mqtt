@@ -32,6 +32,11 @@ TCP socket, port 4000. Everything on the wire is upper-case hex-encoded ASCII (e
 2. **All active ports return overall door position** — `CMD_GET_TRANSITION` works on any configured port; they all return the same position. Service defaults to `impulse_port`.
 3. **Invalid port → PORT_ERROR or LOGOUT** — querying a port outside the active range returns error code 10 (PORT_ERROR) or an unsolicited LOGOUT. Either terminates or disrupts the session.
 4. **One session at a time** — running the CLI while the service is up triggers a reconnect in the service.
+5. **⚠️ FIRMWARE BUG: Intermittent unresponsiveness** — The gateway (firmware EE001425-08) has a known issue where it becomes completely unresponsive, rejecting all commands/queries with PORT_ERROR even though ports exist. Root causes identified:
+   - **Rapid command sequences**: Sending directional commands (up/down) within ~7 seconds triggers rate limiting or buffer overflow
+   - **Long position polling**: Aggressive polling (every 1s) while gateway is rate-limited can cause session corruption
+   - Recovery: Physical reboot of gateway device required. Service monitors this and alerts via MQTT (`gateway_health` attribute).
+   - Mitigation: Rate limiting enforced — directional commands spaced minimum 2 seconds apart. STOP commands bypass rate limit (emergency operation).
 
 ## Port discovery
 
@@ -58,6 +63,32 @@ systemctl status bisecur2mqtt
 systemctl restart bisecur2mqtt
 journalctl -u bisecur2mqtt -f
 ```
+
+## Rate Limiting
+
+The service implements **command rate limiting** to prevent gateway firmware lockups:
+
+- **Directional commands** (up, down, impulse, partial, light): Minimum 2-second spacing enforced
+- **STOP commands**: Bypass rate limiting (always allowed immediately for safety)
+- Logged as: `Rate limiting: <action> delayed X.XXs (last command: <action>, X.Xs ago)`
+
+Example safe sequences:
+- `up` → wait 2s → `down` ✅
+- `up` → wait 1s → `stop` ✅ (STOP allowed immediately)
+- `down` → `down` (same within 2s) → delayed to 2s ✅
+
+This prevents the scenario that caused Aug 14 lockup:
+- ❌ Old behavior: `up` (09:29:11) + `down` (09:29:18) → gateway unresponsive after 46 min
+- ✅ New behavior: `up` → `down` delayed to meet 2-second minimum
+
+## Gateway Health Monitoring
+
+The service now detects when the gateway becomes unresponsive:
+
+- Tracks consecutive position query failures
+- After 5 consecutive failures: logs error and publishes `bisecur2mqtt/attributes/gateway_health = "unresponsive"`
+- When queries succeed again: logs recovery and sets `gateway_health = "ok"`
+- This helps diagnose whether the gateway needs rebooting
 
 ## Running the CLI
 
