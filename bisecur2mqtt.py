@@ -92,6 +92,8 @@ MQTT_TOPIC_BASE      = config.get("mqtt_topic_base", "bisecur2mqtt")
 MQTT_COMMAND_SUBTOPIC = "send_command"
 MQTT_QOS             = 0
 
+COMMAND_DELAY_SECONDS = float(config.get("command_delay_seconds", 0.5))  # Rate limiting
+
 mqtt_client: paho.Client | None = None
 gateway: BisecurGateway | None  = None
 
@@ -127,6 +129,9 @@ _door_topic: str = "default_door"
 # (The gateway firmware has a known bug where it becomes unresponsive and requires reboot)
 _gw_query_failures: int = 0
 _GW_FAILURE_THRESHOLD: int = 5  # Alert after 5 consecutive failures
+
+# Command rate limiting: track last command time
+_last_command_time: float = 0.0
 
 
 # ------------------------------------------------------------------ #
@@ -244,8 +249,22 @@ def _do_door_action(action: str) -> str:
     """
     Send a door command to the gateway and start position tracking.
     Returns a human-readable result string.
+
+    Enforces a minimum delay between commands to prevent gateway rate limiting
+    (which can cause the gateway to become unresponsive).
     """
-    global _last_door_state, _pos_tracking_thread, _pos_stop_event
+    global _last_door_state, _pos_tracking_thread, _pos_stop_event, _last_command_time
+
+    # Enforce command rate limiting
+    now = time.time()
+    time_since_last = now - _last_command_time
+    if time_since_last < COMMAND_DELAY_SECONDS:
+        delay = COMMAND_DELAY_SECONDS - time_since_last
+        log.debug(f"Rate limiting: waiting {delay:.2f}s before next command")
+        time.sleep(delay)
+        _last_command_time = time.time()
+    else:
+        _last_command_time = now
 
     if action == "stop":
         with _state_lock:
