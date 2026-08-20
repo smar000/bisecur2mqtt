@@ -30,12 +30,13 @@ TCP socket, port 4000. Everything on the wire is upper-case hex-encoded ASCII (e
 
 1. **Pre-login LOGOUT flood** — on reconnect, the gateway sends N stale LOGOUTs before the login response. `login()` drains up to 20 of them. Do not change this.
 2. **All active ports return overall door position** — `CMD_GET_TRANSITION` works on any configured port; they all return the same position. Service defaults to `impulse_port`.
-3. **Invalid port → PORT_ERROR or LOGOUT** — querying a port outside the active range returns error code 10 (PORT_ERROR) or an unsolicited LOGOUT. Either terminates or disrupts the session.
+3. **Invalid port → error code 10 or LOGOUT** — querying a port outside the active range returns error code 10 (labelled `PORT_ERROR` in `legacy/pysecur3/MCP.py`'s reverse-engineered enum — that name is *not* Hörmann-documented, just a guess by that library's author) or an unsolicited LOGOUT. Either terminates or disrupts the session.
+   **⚠️ UNCONFIRMED, TBC (2026-08-20):** error code 10 has also been directly observed on `SET_STATE`/`GET_TRANSITION` calls for perfectly valid, active ports, on commands that went on to succeed anyway (watched the door complete a full open/close traverse while every call in the sequence — including the initiating `SET_STATE` — raised this exact error, confirmed via raw packet capture with a correctly-matching session token, so it wasn't a parsing bug). So code 10 does **not** reliably mean "invalid port" or "command failed" in all contexts — it may be contextual/multi-purpose, or the reverse-engineered label may just be wrong for this case. `_do_door_action()` in `bisecur2mqtt.py` treats code 10 as non-fatal for door actions as a result (see `_AMBIGUOUS_GW_ERROR_CODE`), but this is a guess/workaround, not a proven root cause — revisit if better evidence turns up. It also does *not* explain the "door moves for a few seconds then stops" symptom by itself; that still looks best explained by a controller (e.g. openHAB) publishing the same directional command twice in quick succession, which the operator likely reads as a second press (stop/reverse) — see the duplicate-command fix below.
 4. **One session at a time** — running the CLI while the service is up triggers a reconnect in the service.
 5. **⚠️ FIRMWARE BUG: Intermittent unresponsiveness** — The gateway (firmware EE001425-08) has a known issue where it becomes completely unresponsive, rejecting all commands/queries with PORT_ERROR even though ports exist. Root causes identified:
    - **Rapid command sequences**: Sending directional commands (up/down) within ~7 seconds triggers rate limiting or buffer overflow
    - **Long position polling**: Aggressive polling (every 1s) while gateway is rate-limited can cause session corruption
-   - Recovery: Physical reboot of gateway device required. Service monitors this and alerts via MQTT (`gateway_health` attribute).
+   - Recovery: Physical reboot of gateway device required. Service monitors this and alerts via MQTT (`gateway_health` attribute). The gateway sits on a zigbee smart socket, so this can be done remotely without a physical visit: publish `ON`/`OFF` to `zigbee2mqtt/garage_bisecure_gateway/set` (`ON` = socket powered/gateway on, `OFF` = socket powered off/gateway off). Cycle OFF then ON and allow boot time before retesting.
    - Mitigation: Rate limiting enforced — directional commands spaced minimum 2 seconds apart. STOP commands bypass rate limit (emergency operation).
 
 ## Port discovery
@@ -68,18 +69,29 @@ journalctl -u bisecur2mqtt -f
 
 The service implements **command rate limiting** to prevent gateway firmware lockups:
 
-- **Directional commands** (up, down, impulse, partial, light): Minimum 2-second spacing enforced
+- **Directional commands** (up, down, impulse, partial, light): Minimum 2-second spacing enforced between *different* actions
+- **Duplicate of the same action within 2s is dropped, not delayed** — see below
 - **STOP commands**: Bypass rate limiting (always allowed immediately for safety)
 - Logged as: `Rate limiting: <action> delayed X.XXs (last command: <action>, X.Xs ago)`
 
-Example safe sequences:
-- `up` → wait 2s → `down` ✅
+Example sequences:
+- `up` → wait 2s → `down` ✅ delayed to 2s minimum spacing
 - `up` → wait 1s → `stop` ✅ (STOP allowed immediately)
-- `down` → `down` (same within 2s) → delayed to 2s ✅
+- `down` → `down` (same action, within 2s) → **second one dropped**, logged as `Ignoring duplicate 'down' (...)`
 
 This prevents the scenario that caused Aug 14 lockup:
 - ❌ Old behavior: `up` (09:29:11) + `down` (09:29:18) → gateway unresponsive after 46 min
 - ✅ New behavior: `up` → `down` delayed to meet 2-second minimum
+
+**Duplicate-command bug (found & fixed 2026-08-20):** the first version of this rate limiter
+delayed a *repeated* same-direction command (e.g. two `down` messages published back-to-back by
+a flaky controller) rather than dropping it — so instead of both hitting the gateway near-
+simultaneously (harmless), the second one landed ~2-3s later while the door was genuinely mid-
+travel. BiSecur-wired operators read a second press while already moving as stop/reverse, so the
+door would run for a couple of seconds and stop, requiring repeated impulses to complete a
+traverse. Fix: a repeat of the *same* action within the 2s window is now dropped outright instead
+of delayed-and-resent. A genuinely different action (e.g. `up` then `down`) is still delayed as
+before, since that's the real gateway buffer-overflow protection this was built for.
 
 ## Gateway Health Monitoring
 
@@ -89,6 +101,19 @@ The service now detects when the gateway becomes unresponsive:
 - After 5 consecutive failures: logs error and publishes `bisecur2mqtt/attributes/gateway_health = "unresponsive"`
 - When queries succeed again: logs recovery and sets `gateway_health = "ok"`
 - This helps diagnose whether the gateway needs rebooting
+
+## Known issues (found 2026-08-20, not yet fixed)
+
+1. **`_track_door_position()` has no cap/timeout on repeated `BisecurError`.** If the
+   gateway keeps erroring on every position query, the loop just polls forever at
+   1 req/s with no backoff or give-up condition. Observed a 9-minute unbroken instance
+   of this in production logs.
+2. **Neither that loop's `ConnectionError` path nor `_periodic_poll_worker()` call
+   `_trigger_reconnect()`** on disconnect — both just log/skip. The service currently
+   only self-heals when the *next* incoming MQTT command arrives and `do_command()`
+   notices `gateway.is_connected` is False. There's a real window (observed ~2.5
+   minutes) where the service is fully disconnected and silent — not polling, not
+   alerting, not reconnecting on its own.
 
 ## Running the CLI
 

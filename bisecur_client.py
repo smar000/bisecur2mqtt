@@ -29,7 +29,17 @@ log = logging.getLogger(__name__)
 
 
 class BisecurError(Exception):
-    pass
+    """
+    Raised for BiSecur protocol/gateway errors.
+
+    gateway_error_code: the raw error byte from a CMD_ERROR response, when
+    known (None for CRC failures, timeouts, and other non-protocol errors).
+    Callers that need to distinguish specific gateway error codes should use
+    this attribute rather than parsing the message string.
+    """
+    def __init__(self, message: str, gateway_error_code: int | None = None):
+        super().__init__(message)
+        self.gateway_error_code = gateway_error_code
 
 
 class BisecurGateway:
@@ -324,7 +334,7 @@ class BisecurGateway:
 
         # This gateway sends CMD_ERROR without the is_response bit; check both ways.
         if cmd_id == self.CMD_ERROR and data:
-            raise BisecurError(f"Gateway returned error code {data[0]}")
+            raise BisecurError(f"Gateway returned error code {data[0]}", gateway_error_code=data[0])
 
         return {'cmd_id': cmd_id, 'is_response': is_response, 'data': data}
 

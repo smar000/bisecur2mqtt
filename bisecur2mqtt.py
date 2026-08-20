@@ -128,6 +128,12 @@ _door_topic: str = "default_door"
 _gw_query_failures: int = 0
 _GW_FAILURE_THRESHOLD: int = 5  # Alert after 5 consecutive failures
 
+# UNCONFIRMED / TBC (2026-08-20): gateway error code that has been directly observed
+# on SET_STATE/GET_TRANSITION calls that nonetheless succeeded — see the long comment
+# in _do_door_action(). Not treated as fatal for door actions. This is a workaround
+# for observed behaviour, not a confirmed explanation of *why* the gateway does this.
+_AMBIGUOUS_GW_ERROR_CODE: int = 10
+
 # Command rate limiting: track last command time and action
 _last_command_time: float = 0.0
 _last_command_action: str | None = None
@@ -252,8 +258,14 @@ def _do_door_action(action: str) -> str:
 
     Rate limiting logic:
     - STOP commands are always allowed (emergency operation)
-    - Same-direction or opposite-direction commands: max once per 2 seconds
-    - This prevents gateway rate limiting / buffer overflow issues
+    - A repeat of the SAME action within the window is a duplicate (e.g. a
+      controller publishing the same command twice) and is dropped outright.
+      Sending it anyway — even delayed — reaches the operator as a second
+      button press while the door is already moving, which many BiSecur-wired
+      operators interpret as stop/reverse.
+    - A DIFFERENT directional command within the window (e.g. up then down)
+      is delayed to a 2-second minimum spacing, to avoid the gateway
+      rate limiting / buffer overflow issue.
     """
     global _last_door_state, _pos_tracking_thread, _pos_stop_event
     global _last_command_time, _last_command_action
@@ -262,6 +274,16 @@ def _do_door_action(action: str) -> str:
     if action != "stop":
         now = time.time()
         time_since_last = now - _last_command_time
+
+        if action == _last_command_action and time_since_last < _COMMAND_RATE_LIMIT_SECONDS:
+            # Duplicate of the command already in flight — most likely two MQTT
+            # messages for the same press. Drop it instead of delaying it: a
+            # delayed resend would land while the door is genuinely moving and
+            # get read by the operator as a second press (stop/reverse).
+            msg = (f"Ignoring duplicate '{action}' ({time_since_last:.2f}s after previous "
+                   f"'{action}' — door is already moving)")
+            log.info(msg)
+            return msg
 
         # Rate-limit if within the window AND it's a directional command (not STOP)
         if time_since_last < _COMMAND_RATE_LIMIT_SECONDS and _last_command_action is not None:
@@ -299,8 +321,23 @@ def _do_door_action(action: str) -> str:
         _trigger_reconnect()
         return str(e)
     except BisecurError as e:
-        log.error(f"Door action '{action}' rejected by gateway: {e}")
-        return str(e)
+        if e.gateway_error_code == _AMBIGUOUS_GW_ERROR_CODE:
+            # UNCONFIRMED WORKAROUND (2026-08-20) — this is a guess, not a proven
+            # root cause, and is still TBC: we've directly observed the gateway
+            # returning "error code 10" on SET_STATE/GET_TRANSITION calls that
+            # nonetheless succeeded (watched the door complete a full up/down
+            # traverse while every call in the sequence, including this one,
+            # raised this exact error). Treating it as fatal here was a false
+            # negative — it aborted before ever starting position tracking, so
+            # we lost all telemetry for door actions that were actually working.
+            # We don't know why the gateway does this. If future evidence shows
+            # code 10 *does* sometimes mean genuine failure, this needs revisiting.
+            log.warning(f"Door action '{action}': gateway returned error code "
+                        f"{_AMBIGUOUS_GW_ERROR_CODE} (ambiguous, not treated as fatal — "
+                        f"see CLAUDE.md; proceeding as if the command was sent)")
+        else:
+            log.error(f"Door action '{action}' rejected by gateway: {e}")
+            return str(e)
 
     # Stop any existing tracking thread
     _pos_stop_event.set()
